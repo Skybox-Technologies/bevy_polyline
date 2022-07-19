@@ -17,7 +17,7 @@ use bevy::{
         render_asset::{RenderAsset, RenderAssetPlugin, RenderAssets},
         render_component::ExtractComponentPlugin,
         render_phase::*,
-        render_resource::{std140::AsStd140, std140::Std140, *},
+        render_resource::*,
         renderer::RenderDevice,
         view::{ExtractedView, ViewUniformOffset, VisibleEntities},
         RenderApp, RenderStage,
@@ -60,9 +60,7 @@ impl PolylineMaterial {
                 ty: BindingType::Buffer {
                     ty: BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: BufferSize::new(
-                        PolylineMaterialUniform::std140_size_static() as u64,
-                    ),
+                    min_binding_size: BufferSize::new(PolylineMaterialUniform::min_size().into()),
                 },
                 count: None,
             }],
@@ -82,8 +80,9 @@ impl PolylineMaterial {
     }
 }
 
-#[derive(AsStd140, Component, Clone)]
+#[derive(ShaderType, Component, Clone)]
 pub struct PolylineMaterialUniform {
+    #[align(16)]
     pub color: Vec4,
     pub width: f32,
 }
@@ -115,12 +114,19 @@ impl RenderAsset for PolylineMaterial {
             width: material.width,
             color: material.color.as_linear_rgba_f32().into(),
         };
-        let value_std140 = value.as_std140();
+
+        let byte_buffer = [0u8;
+            <PolylineMaterialUniform as bevy::render::render_resource::encase::Size>::SIZE.get()
+                as usize];
+        let mut buffer = bevy::render::render_resource::encase::UniformBuffer::new(byte_buffer);
+        buffer
+            .write(&value)
+            .expect("Failed to write to polyline material uniform buffer");
 
         let buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("polyline_material_uniform_buffer"),
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            contents: value_std140.as_bytes(),
+            contents: buffer.as_ref(),
         });
 
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
